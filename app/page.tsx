@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { UserButton } from "@clerk/nextjs";
 
 type Attachment = {
   type: "pdf" | "image" | "text";
@@ -15,11 +16,51 @@ type Message = {
   attachments?: Attachment[];
 };
 
+type Session = {
+  id: string;
+  name: string;
+  messages: Message[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+const STORAGE_KEY = "aluta:sessions";
+const ACTIVE_KEY = "aluta:active";
+
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function deriveSessionName(messages: Message[]): string {
+  const firstUser = messages.find((m) => m.role === "user");
+  if (!firstUser) return "New session";
+  if (firstUser.attachments && firstUser.attachments.length > 0) {
+    return firstUser.attachments[0].name.replace(/\.[^.]+$/, "");
+  }
+  const trimmed = firstUser.content.trim();
+  if (!trimmed) return "New session";
+  return trimmed.length > 40 ? trimmed.slice(0, 40) + "…" : trimmed;
+}
+
+function formatRelative(ts: number): string {
+  const diff = Date.now() - ts;
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>(
     [],
   );
@@ -31,6 +72,75 @@ export default function Home() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, loading]);
 
+  // Load sessions on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const stored: Session[] = raw ? JSON.parse(raw) : [];
+      setSessions(stored);
+      const active = localStorage.getItem(ACTIVE_KEY);
+      if (active && stored.find((s) => s.id === active)) {
+        setActiveId(active);
+        const found = stored.find((s) => s.id === active);
+        if (found) setMessages(found.messages);
+      }
+    } catch (e) {
+      console.error("Failed to load sessions", e);
+    }
+  }, []);
+
+  // Save sessions whenever messages change
+  useEffect(() => {
+    if (messages.length === 0) return;
+    let id = activeId;
+    let updated: Session[];
+    const now = Date.now();
+    if (!id) {
+      // Create new session
+      id = generateId();
+      const newSession: Session = {
+        id,
+        name: deriveSessionName(messages),
+        messages,
+        createdAt: now,
+        updatedAt: now,
+      };
+      updated = [newSession, ...sessions];
+      setActiveId(id);
+      localStorage.setItem(ACTIVE_KEY, id);
+    } else {
+      // Update existing session
+      updated = sessions.map((s) =>
+        s.id === id
+          ? {
+              ...s,
+              messages,
+              name: deriveSessionName(messages),
+              updatedAt: now,
+            }
+          : s,
+      );
+      if (!updated.find((s) => s.id === id)) {
+        updated = [
+          {
+            id,
+            name: deriveSessionName(messages),
+            messages,
+            createdAt: now,
+            updatedAt: now,
+          },
+          ...updated,
+        ];
+      }
+    }
+    setSessions(updated);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    } catch (e) {
+      console.error("Failed to save sessions", e);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages]);
   // Derive current project from first user message attachment
   const currentProject = messages.find(
     (m) => m.role === "user" && m.attachments && m.attachments.length > 0,
@@ -63,8 +173,18 @@ export default function Home() {
           const fd = new FormData();
           fd.append("file", file);
           const res = await fetch("/api/extract", { method: "POST", body: fd });
+          if (!res.ok) {
+            let errMsg = `Server returned ${res.status}`;
+            try {
+              const data = await res.json();
+              errMsg = data.error || errMsg;
+            } catch {
+              const text = await res.text();
+              errMsg = text.slice(0, 100) || errMsg;
+            }
+            throw new Error(errMsg);
+          }
           const data = await res.json();
-          if (!res.ok) throw new Error(data.error || "Extraction failed");
           newAttachments.push({
             type: "text",
             mediaType: "text/plain",
@@ -144,6 +264,32 @@ export default function Home() {
     setInput("");
     setPendingAttachments([]);
     setError("");
+    setActiveId(null);
+    localStorage.removeItem(ACTIVE_KEY);
+  }
+
+  function loadSession(id: string) {
+    const s = sessions.find((x) => x.id === id);
+    if (!s) return;
+    setMessages(s.messages);
+    setActiveId(id);
+    setInput("");
+    setPendingAttachments([]);
+    setError("");
+    localStorage.setItem(ACTIVE_KEY, id);
+    setSidebarOpen(false);
+  }
+
+  function deleteSession(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    const updated = sessions.filter((s) => s.id !== id);
+    setSessions(updated);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    if (activeId === id) {
+      setMessages([]);
+      setActiveId(null);
+      localStorage.removeItem(ACTIVE_KEY);
+    }
   }
 
   return (
@@ -217,8 +363,46 @@ export default function Home() {
           )}
         </div>
 
-        {/* Modes */}
         <div className="px-4 py-4 flex-1 overflow-y-auto">
+          {/* Recent sessions */}
+          {sessions.length > 0 && (
+            <div className="mb-6">
+              <div className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-2">
+                Recent sessions
+              </div>
+              <div className="space-y-1">
+                {sessions.slice(0, 10).map((s) => (
+                  <div
+                    key={s.id}
+                    onClick={() => loadSession(s.id)}
+                    className={`group flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-colors ${
+                      activeId === s.id
+                        ? "bg-[#E5B045]/15 border border-[#E5B045]/30"
+                        : "hover:bg-white/5 border border-transparent"
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">
+                        {s.name}
+                      </div>
+                      <div className="text-[10px] text-white/40 mt-0.5">
+                        {formatRelative(s.updatedAt)} · {s.messages.length} msgs
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => deleteSession(s.id, e)}
+                      className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-red-400 text-xs ml-2 transition-opacity"
+                      aria-label="Delete session"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Modes */}
           <div className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-3">
             Modes
           </div>
@@ -237,9 +421,21 @@ export default function Home() {
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-4 border-t border-white/10 text-xs text-white/40">
-          <div className="font-medium text-white/60">Aluta v1</div>
-          <div className="mt-1">Built for Claude Hackathon UNILAG</div>
+        <div className="px-4 py-4 border-t border-white/10">
+          <div className="flex items-center gap-3 mb-3">
+            <UserButton
+              appearance={{
+                elements: {
+                  avatarBox: "w-9 h-9 ring-2 ring-[#E5B045]/40",
+                },
+              }}
+            />
+            <div className="text-xs">
+              <div className="font-medium text-white/80">Your account</div>
+              <div className="text-white/40">Click avatar to manage</div>
+            </div>
+          </div>
+          <div className="text-[10px] text-white/30">Aluta v1</div>
         </div>
       </aside>
 
