@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mammoth from "mammoth";
 
-import pdf from "pdf-parse";
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -14,14 +13,28 @@ export async function POST(req: NextRequest) {
     const name = file.name.toLowerCase();
 
     let text = "";
+
     if (name.endsWith(".docx")) {
       const result = await mammoth.extractRawText({ buffer });
       text = result.value;
     } else if (name.endsWith(".txt") || name.endsWith(".md")) {
       text = buffer.toString("utf-8");
     } else if (name.endsWith(".pdf")) {
-      const data = await pdf(buffer);
-      text = data.text;
+      const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+      const loadingTask = pdfjs.getDocument({
+        data: new Uint8Array(buffer),
+      });
+      const pdfDoc = await loadingTask.promise;
+      const pageTexts: string[] = [];
+      for (let i = 1; i <= pdfDoc.numPages; i++) {
+        const page = await pdfDoc.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items
+          .map((item) => ("str" in item ? item.str : ""))
+          .join(" ");
+        pageTexts.push(pageText);
+      }
+      text = pageTexts.join("\n\n");
     } else {
       return NextResponse.json(
         { error: "Unsupported file type" },
@@ -29,7 +42,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Truncate if absurdly long — keep first 30k chars (~7500 tokens)
     if (text.length > 30000) {
       text = text.slice(0, 30000) + "\n\n[Document truncated]";
     }
