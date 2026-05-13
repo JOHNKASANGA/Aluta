@@ -14,22 +14,28 @@ type Message = {
   content: string;
   attachments?: Attachment[];
 };
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [started, setStarted] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>(
     [],
   );
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, loading]);
+
+  // Derive current project from first user message attachment
+  const currentProject = messages.find(
+    (m) => m.role === "user" && m.attachments && m.attachments.length > 0,
+  )?.attachments?.[0];
+
   async function handleFiles(files: FileList | null) {
     if (!files) return;
     const newAttachments: Attachment[] = [];
@@ -38,23 +44,21 @@ export default function Home() {
         setError(`${file.name} is too large (max 10MB)`);
         continue;
       }
-
-      const name = file.name.toLowerCase();
-      const isPdf = file.type === "application/pdf" || name.endsWith(".pdf");
+      const lower = file.name.toLowerCase();
+      const isPdf = file.type === "application/pdf" || lower.endsWith(".pdf");
       const isImage = file.type.startsWith("image/");
       const isDocx =
-        name.endsWith(".docx") ||
+        lower.endsWith(".docx") ||
         file.type ===
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-      const isText = name.endsWith(".txt") || name.endsWith(".md");
+      const isText = lower.endsWith(".txt") || lower.endsWith(".md");
 
       if (!isPdf && !isImage && !isDocx && !isText) {
         setError(`${file.name} is not a supported file type`);
         continue;
       }
 
-      if (isDocx || isText) {
-        // Extract text via API
+      if (isDocx || isText || isPdf) {
         try {
           const fd = new FormData();
           fd.append("file", file);
@@ -77,7 +81,6 @@ export default function Home() {
         continue;
       }
 
-      // PDF and image: base64 encode
       const data = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => {
@@ -88,7 +91,7 @@ export default function Home() {
         reader.readAsDataURL(file);
       });
       newAttachments.push({
-        type: isPdf ? "pdf" : "image",
+        type: "image",
         mediaType: file.type,
         data,
         name: file.name,
@@ -99,7 +102,6 @@ export default function Home() {
 
   async function send() {
     if ((!input.trim() && pendingAttachments.length === 0) || loading) return;
-    if (!started) setStarted(true);
 
     const userMessage: Message = {
       role: "user",
@@ -137,250 +139,454 @@ export default function Home() {
     }
   }
 
+  function newSession() {
+    setMessages([]);
+    setInput("");
+    setPendingAttachments([]);
+    setError("");
+  }
+
   return (
-    <main className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50">
-      {/* Header */}
-      <header className="bg-white border-b border-stone-200 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div
+      style={{ fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" }}
+      className="min-h-screen flex bg-[#FAF6EE] text-[#1A1033]"
+    >
+      {/* Sidebar */}
+      <aside
+        className={`${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        } md:translate-x-0 fixed md:static inset-y-0 left-0 z-30 w-72 bg-[#1A0B3D] text-[#FAF6EE] flex flex-col transition-transform shadow-2xl`}
+      >
+        {/* Logo */}
+        <div className="px-6 py-6 border-b border-white/10">
           <div className="flex items-center gap-3">
             <img
               src="/aluta-logo.png"
               alt="Aluta"
-              className="w-11 h-11 rounded-full shadow-md"
+              className="w-11 h-11 rounded-full ring-2 ring-[#E5B045]/40"
             />
             <div>
-              <h1 className="text-lg font-bold text-stone-900">Aluta</h1>
-              <p className="text-xs text-stone-500">
-                Practice the panic. Pass the panel.
+              <h1
+                className="text-2xl font-black tracking-tight"
+                style={{ fontFamily: "Fraunces, serif" }}
+              >
+                Aluta
+              </h1>
+              <p className="text-xs text-[#E5B045] font-medium tracking-wide">
+                Practice the panic.
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-full text-xs font-medium">
-            <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
-            Defence Mode
-          </div>
         </div>
-      </header>
 
-      <div className="max-w-4xl mx-auto px-6 py-8">
-        {/* Hero (only before first message) */}
-        {!started && (
-          <div className="mb-8">
-            <div className="bg-white rounded-3xl shadow-sm border border-stone-200 p-8 mb-6">
-              <div className="flex items-start gap-4 mb-6">
-                <div className="text-5xl">🎓</div>
-                <div>
-                  <h2 className="text-2xl font-bold text-stone-900 mb-2">
-                    Practice your project defence
-                  </h2>
-                  <p className="text-stone-600 leading-relaxed">
-                    Aluta plays the external examiner so you can rehearse before
-                    the real one. Share your project, get grilled, learn what to
-                    fix.
-                  </p>
-                </div>
-              </div>
+        {/* New session button */}
+        <div className="px-4 py-4 border-b border-white/10">
+          <button
+            onClick={newSession}
+            className="w-full bg-[#E5B045] hover:bg-[#F0C055] text-[#1A0B3D] font-semibold py-2.5 rounded-lg text-sm flex items-center justify-center gap-2 transition-colors"
+          >
+            <span>+</span>
+            <span>New defence session</span>
+          </button>
+        </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-                <div className="bg-amber-50 rounded-2xl p-4 border border-amber-100">
-                  <div className="text-2xl mb-2">📄</div>
-                  <div className="font-semibold text-stone-900 text-sm mb-1">
-                    Share your work
-                  </div>
-                  <div className="text-xs text-stone-600">
-                    Paste your title, methodology, and findings
-                  </div>
-                </div>
-                <div className="bg-rose-50 rounded-2xl p-4 border border-rose-100">
-                  <div className="text-2xl mb-2">🔍</div>
-                  <div className="font-semibold text-stone-900 text-sm mb-1">
-                    Get questioned
-                  </div>
-                  <div className="text-xs text-stone-600">
-                    Aluta probes for weaknesses, line by line
-                  </div>
-                </div>
-                <div className="bg-emerald-50 rounded-2xl p-4 border border-emerald-100">
-                  <div className="text-2xl mb-2">✅</div>
-                  <div className="font-semibold text-stone-900 text-sm mb-1">
-                    Walk in ready
-                  </div>
-                  <div className="text-xs text-stone-600">
-                    Verdict and three things to fix
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200">
-                <div className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2">
-                  Try this to start
-                </div>
-                <div className="text-sm text-stone-700 italic">
-                  "My project is titled [...]. My research questions are [...].
-                  I used [methodology]. My main finding is [...]."
-                </div>
-              </div>
-            </div>
+        {/* Current project */}
+        <div className="px-4 py-4 border-b border-white/10">
+          <div className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-2">
+            Current project
           </div>
-        )}
-
-        {/* Conversation */}
-        <div
-          ref={scrollRef}
-          className="space-y-4 mb-6 max-h-[60vh] overflow-y-auto"
-        >
-          {messages.map((m, i) => (
-            <div
-              key={i}
-              className={`flex gap-3 ${m.role === "user" ? "flex-row-reverse" : ""}`}
-            >
-              {m.role === "user" ? (
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-sm font-semibold flex-shrink-0 shadow-sm">
-                  You
-                </div>
-              ) : (
-                <img
-                  src="/aluta-logo.png"
-                  alt="Aluta"
-                  className="w-9 h-9 rounded-full flex-shrink-0 shadow-sm"
-                />
-              )}
-              <div
-                className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
-                  m.role === "user"
-                    ? "bg-emerald-600 text-white rounded-tr-sm"
-                    : "bg-white text-stone-800 border border-stone-200 rounded-tl-sm"
-                }`}
-              >
-                {m.role === "assistant" && (
-                  <div className="text-xs font-semibold text-indigo-600 mb-1">
-                    External Examiner
+          {currentProject ? (
+            <div className="bg-white/5 border border-white/10 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <span className="text-lg">📄</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">
+                    {currentProject.name}
                   </div>
-                )}
-                {m.attachments && m.attachments.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {m.attachments.map((att, idx) => (
-                      <div
-                        key={idx}
-                        className="bg-emerald-700/40 text-white text-xs px-2 py-1 rounded flex items-center gap-1"
-                      >
-                        <span>
-                          {att.type === "pdf"
-                            ? "📄"
-                            : att.type === "image"
-                              ? "🖼️"
-                              : "📝"}
-                        </span>
-                        <span className="max-w-[120px] truncate">
-                          {att.name}
-                        </span>
-                      </div>
-                    ))}
+                  <div className="text-xs text-white/50 mt-0.5">
+                    Loaded · {messages.length} messages
                   </div>
-                )}
-                <div className="whitespace-pre-wrap">{m.content}</div>
-              </div>
-            </div>
-          ))}
-          {loading && (
-            <div className="flex gap-3">
-              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-sm font-semibold shadow-sm">
-                A
-              </div>
-              <div className="bg-white border border-stone-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
-                <div className="flex gap-1">
-                  <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></span>
-                  <span
-                    className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"
-                    style={{ animationDelay: "0.15s" }}
-                  ></span>
-                  <span
-                    className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"
-                    style={{ animationDelay: "0.3s" }}
-                  ></span>
                 </div>
               </div>
             </div>
-          )}
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm">
-              {error}
+          ) : (
+            <div className="text-xs text-white/40 italic">
+              No project loaded. Upload a PDF or paste your project details to
+              begin.
             </div>
           )}
         </div>
 
-        {/* Input */}
-        <div className="bg-white rounded-2xl border border-stone-200 shadow-sm p-3 sticky bottom-4">
-          {pendingAttachments.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-2 px-2">
-              {pendingAttachments.map((att, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-2 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg text-xs border border-indigo-200"
-                >
-                  <span>{att.type === "pdf" ? "📄" : "🖼️"}</span>
-                  <span className="max-w-[160px] truncate">{att.name}</span>
-                  <button
-                    onClick={() =>
-                      setPendingAttachments((prev) =>
-                        prev.filter((_, idx) => idx !== i),
-                      )
-                    }
-                    className="text-indigo-400 hover:text-indigo-700 font-bold"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKey}
-            placeholder={
-              started
-                ? "Defend your answer..."
-                : "Paste your project details, or upload your project PDF..."
-            }
-            rows={3}
-            className="w-full bg-transparent text-sm text-stone-800 placeholder-stone-400 focus:outline-none resize-none px-2 py-1"
-          />
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/pdf,image/*,.docx,.txt,.md"
-            multiple
-            onChange={(e) => handleFiles(e.target.files)}
-            className="hidden"
-          />
-          <div className="flex items-center justify-between pt-2 border-t border-stone-100">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="text-stone-500 hover:text-indigo-600 text-sm flex items-center gap-1.5 px-2"
-            >
-              <span>📎</span>
-              <span>Attach file</span>
-            </button>
-            <button
-              onClick={send}
-              disabled={
-                loading || (!input.trim() && pendingAttachments.length === 0)
-              }
-              className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-5 py-2 rounded-xl text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-md transition-shadow flex items-center gap-2"
-            >
-              Send
-              <span>→</span>
-            </button>
+        {/* Modes */}
+        <div className="px-4 py-4 flex-1 overflow-y-auto">
+          <div className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-3">
+            Modes
+          </div>
+          <div className="space-y-1.5">
+            <ModeRow
+              icon="🛡️"
+              label="Defence"
+              tag="Active"
+              active
+              accent="#E5B045"
+            />
+            <ModeRow icon="📚" label="Tutor" tag="v2" />
+            <ModeRow icon="📖" label="Reading Guide" tag="v2" />
+            <ModeRow icon="📅" label="Scheduler" tag="v2" />
           </div>
         </div>
 
         {/* Footer */}
-        <div className="text-center text-xs text-stone-400 mt-8 pb-4">
-          Built solo for Claude Hackathon UNILAG · Defence is one of four Aluta
-          features · Tutor, Reading Guide, Scheduler coming soon
+        <div className="px-4 py-4 border-t border-white/10 text-xs text-white/40">
+          <div className="font-medium text-white/60">Aluta v1</div>
+          <div className="mt-1">Built for Claude Hackathon UNILAG</div>
         </div>
+      </aside>
+
+      {/* Sidebar toggle (mobile) */}
+      <button
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        className="md:hidden fixed top-4 left-4 z-40 bg-[#1A0B3D] text-[#FAF6EE] p-2 rounded-lg shadow-lg"
+      >
+        ☰
+      </button>
+
+      {/* Main area */}
+      <main className="flex-1 flex flex-col min-w-0">
+        {/* Top bar */}
+        <header className="border-b border-[#1A0B3D]/10 bg-[#FAF6EE]/80 backdrop-blur-sm px-6 md:px-10 py-4 sticky top-0 z-20">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#E5B045] animate-pulse"></span>
+                <span className="text-xs uppercase tracking-widest text-[#1A0B3D]/60 font-bold">
+                  Defence Mode
+                </span>
+              </div>
+              <h2
+                className="text-2xl md:text-3xl font-bold mt-1"
+                style={{ fontFamily: "Fraunces, serif" }}
+              >
+                The External Examiner
+              </h2>
+            </div>
+            <div className="hidden md:flex items-center gap-2 bg-[#1A0B3D] text-[#FAF6EE] px-4 py-2 rounded-full text-xs font-medium">
+              <span>🎓</span>
+              <span>Pass the panel</span>
+            </div>
+          </div>
+        </header>
+
+        {/* Chat / hero area */}
+        <div
+          ref={scrollRef}
+          className="flex-1 overflow-y-auto px-6 md:px-10 py-6"
+        >
+          {messages.length === 0 && (
+            <div className="max-w-3xl mx-auto">
+              {/* Hero card */}
+              <div className="bg-gradient-to-br from-[#1A0B3D] to-[#2D1762] text-[#FAF6EE] rounded-3xl p-8 md:p-10 shadow-xl relative overflow-hidden mb-6">
+                {/* Decorative element */}
+                <div className="absolute -top-12 -right-12 w-48 h-48 rounded-full bg-[#E5B045]/20 blur-3xl"></div>
+                <div className="absolute -bottom-10 -left-10 w-40 h-40 rounded-full bg-[#E5B045]/10 blur-2xl"></div>
+
+                <div className="relative">
+                  <div className="inline-flex items-center gap-2 bg-[#E5B045]/20 text-[#E5B045] px-3 py-1 rounded-full text-xs font-semibold mb-4">
+                    <span>🛡️</span>
+                    <span>Headline Feature</span>
+                  </div>
+                  <h3
+                    className="text-3xl md:text-4xl font-black leading-tight mb-3"
+                    style={{ fontFamily: "Fraunces, serif" }}
+                  >
+                    Rehearse your defence.
+                    <br />
+                    Walk in ready.
+                  </h3>
+                  <p className="text-[#FAF6EE]/80 text-base leading-relaxed max-w-xl">
+                    Aluta plays your external examiner. It reads your project,
+                    asks the hard questions, catches contradictions, and tells
+                    you exactly what to fix.
+                  </p>
+                </div>
+              </div>
+
+              {/* Feature row */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+                <FeatureTile
+                  num="01"
+                  title="Share your work"
+                  body="Upload your project PDF, .docx, or paste your details."
+                />
+                <FeatureTile
+                  num="02"
+                  title="Get questioned"
+                  body="Aluta probes for weaknesses chapter by chapter."
+                />
+                <FeatureTile
+                  num="03"
+                  title="Walk in ready"
+                  body="A verdict and three things to fix before the real defence."
+                />
+              </div>
+
+              {/* Prompt suggestion */}
+              <div className="bg-white border-2 border-dashed border-[#1A0B3D]/15 rounded-2xl p-5">
+                <div className="text-[10px] uppercase tracking-widest text-[#1A0B3D]/50 font-bold mb-2">
+                  Try this to start
+                </div>
+                <div
+                  className="text-sm text-[#1A1033] italic leading-relaxed"
+                  style={{ fontFamily: "Fraunces, serif" }}
+                >
+                  &ldquo;My project is titled [title]. My research questions are
+                  [questions]. I used [methodology]. My main finding is
+                  [finding].&rdquo;
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Messages */}
+          <div className="max-w-3xl mx-auto space-y-5">
+            {messages.map((m, i) => (
+              <div
+                key={i}
+                className={`flex gap-3 ${
+                  m.role === "user" ? "flex-row-reverse" : ""
+                }`}
+              >
+                {m.role === "user" ? (
+                  <div className="w-10 h-10 rounded-full bg-[#E5B045] flex items-center justify-center text-[#1A0B3D] text-xs font-bold flex-shrink-0 shadow-sm">
+                    YOU
+                  </div>
+                ) : (
+                  <img
+                    src="/aluta-logo.png"
+                    alt="Examiner"
+                    className="w-10 h-10 rounded-full flex-shrink-0 shadow-sm ring-2 ring-[#E5B045]/30"
+                  />
+                )}
+                <div
+                  className={`max-w-[80%] rounded-2xl px-5 py-4 text-sm leading-relaxed shadow-sm ${
+                    m.role === "user"
+                      ? "bg-[#1A0B3D] text-[#FAF6EE] rounded-tr-sm"
+                      : "bg-white text-[#1A1033] border border-[#1A0B3D]/10 rounded-tl-sm"
+                  }`}
+                >
+                  {m.role === "assistant" && (
+                    <div className="text-[10px] uppercase tracking-widest font-bold text-[#1A0B3D]/60 mb-2">
+                      External Examiner
+                    </div>
+                  )}
+                  {m.attachments && m.attachments.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {m.attachments.map((att, idx) => (
+                        <div
+                          key={idx}
+                          className={`text-xs px-2.5 py-1 rounded-md flex items-center gap-1.5 ${
+                            m.role === "user"
+                              ? "bg-white/15 text-[#FAF6EE]"
+                              : "bg-[#1A0B3D]/5 text-[#1A0B3D]"
+                          }`}
+                        >
+                          <span>
+                            {att.type === "pdf"
+                              ? "📄"
+                              : att.type === "image"
+                                ? "🖼️"
+                                : "📝"}
+                          </span>
+                          <span className="max-w-[140px] truncate">
+                            {att.name}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="whitespace-pre-wrap">{m.content}</div>
+                </div>
+              </div>
+            ))}
+
+            {loading && (
+              <div className="flex gap-3">
+                <img
+                  src="/aluta-logo.png"
+                  alt="Examiner"
+                  className="w-10 h-10 rounded-full ring-2 ring-[#E5B045]/30 shadow-sm"
+                />
+                <div className="bg-white border border-[#1A0B3D]/10 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm">
+                  <div className="flex gap-1.5">
+                    <span className="w-2 h-2 bg-[#1A0B3D] rounded-full animate-bounce"></span>
+                    <span
+                      className="w-2 h-2 bg-[#1A0B3D] rounded-full animate-bounce"
+                      style={{ animationDelay: "0.15s" }}
+                    ></span>
+                    <span
+                      className="w-2 h-2 bg-[#1A0B3D] rounded-full animate-bounce"
+                      style={{ animationDelay: "0.3s" }}
+                    ></span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {error && (
+              <div className="bg-red-50 border-l-4 border-red-500 text-red-800 rounded-r-lg px-4 py-3 text-sm">
+                <span className="font-semibold">Error:</span> {error}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Input bar */}
+        <div className="border-t border-[#1A0B3D]/10 bg-white px-6 md:px-10 py-4">
+          <div className="max-w-3xl mx-auto">
+            {pendingAttachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {pendingAttachments.map((att, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-2 bg-[#1A0B3D]/5 text-[#1A0B3D] px-3 py-1.5 rounded-lg text-xs border border-[#1A0B3D]/15"
+                  >
+                    <span>
+                      {att.type === "pdf"
+                        ? "📄"
+                        : att.type === "image"
+                          ? "🖼️"
+                          : "📝"}
+                    </span>
+                    <span className="max-w-[180px] truncate font-medium">
+                      {att.name}
+                    </span>
+                    <button
+                      onClick={() =>
+                        setPendingAttachments((prev) =>
+                          prev.filter((_, idx) => idx !== i),
+                        )
+                      }
+                      className="text-[#1A0B3D]/40 hover:text-[#1A0B3D] font-bold ml-1"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="bg-[#FAF6EE] border-2 border-[#1A0B3D]/10 focus-within:border-[#1A0B3D]/30 rounded-2xl p-3 transition-colors">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKey}
+                placeholder={
+                  messages.length > 0
+                    ? "Defend your answer..."
+                    : "Paste your project, or attach a PDF to begin..."
+                }
+                rows={2}
+                className="w-full bg-transparent text-sm text-[#1A1033] placeholder-[#1A0B3D]/40 focus:outline-none resize-none px-2 py-1"
+              />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf,image/*,.docx,.txt,.md"
+                multiple
+                onChange={(e) => handleFiles(e.target.files)}
+                className="hidden"
+              />
+              <div className="flex items-center justify-between pt-2 border-t border-[#1A0B3D]/10">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-[#1A0B3D]/60 hover:text-[#1A0B3D] text-sm flex items-center gap-1.5 px-2 font-medium"
+                >
+                  <span>📎</span>
+                  <span>Attach</span>
+                </button>
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] text-[#1A0B3D]/40 hidden md:inline">
+                    Enter to send · Shift + Enter for new line
+                  </span>
+                  <button
+                    onClick={send}
+                    disabled={
+                      loading ||
+                      (!input.trim() && pendingAttachments.length === 0)
+                    }
+                    className="bg-[#1A0B3D] hover:bg-[#2D1762] text-[#FAF6EE] px-5 py-2 rounded-xl text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                  >
+                    Send
+                    <span>→</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function ModeRow({
+  icon,
+  label,
+  tag,
+  active = false,
+  accent = "#E5B045",
+}: {
+  icon: string;
+  label: string;
+  tag: string;
+  active?: boolean;
+  accent?: string;
+}) {
+  return (
+    <div
+      className={`flex items-center justify-between px-3 py-2 rounded-lg ${
+        active ? "bg-white/10" : "opacity-50"
+      }`}
+    >
+      <div className="flex items-center gap-2.5">
+        <span className="text-base">{icon}</span>
+        <span className="text-sm font-medium">{label}</span>
       </div>
-    </main>
+      <span
+        className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
+          active ? "" : "text-white/40 border border-white/20"
+        }`}
+        style={active ? { backgroundColor: accent, color: "#1A0B3D" } : {}}
+      >
+        {tag}
+      </span>
+    </div>
+  );
+}
+
+function FeatureTile({
+  num,
+  title,
+  body,
+}: {
+  num: string;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="bg-white border border-[#1A0B3D]/10 rounded-2xl p-5 hover:border-[#E5B045]/50 transition-colors">
+      <div
+        className="text-3xl font-black text-[#E5B045] mb-2"
+        style={{ fontFamily: "Fraunces, serif" }}
+      >
+        {num}
+      </div>
+      <div
+        className="font-bold text-[#1A0B3D] mb-1"
+        style={{ fontFamily: "Fraunces, serif" }}
+      >
+        {title}
+      </div>
+      <div className="text-xs text-[#1A0B3D]/70 leading-relaxed">{body}</div>
+    </div>
   );
 }
