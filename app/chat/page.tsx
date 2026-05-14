@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { UserButton } from "@clerk/nextjs";
+import Link from "next/link";
 
 type Attachment = {
   type: "pdf" | "image" | "text";
@@ -63,6 +64,7 @@ export default function Home() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [mode, setMode] = useState<"defence" | "tutor">("defence");
   const [greeting, setGreeting] = useState("Hello");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>(
     [],
   );
@@ -76,6 +78,12 @@ export default function Home() {
 
   useEffect(() => {
     setGreeting(getTimeGreeting());
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const m = params.get("mode");
+    if (m === "tutor" || m === "defence") setMode(m);
   }, []);
   // Load session list on mount
   // Load session list whenever mode changes
@@ -451,109 +459,42 @@ export default function Home() {
       <aside
         className={`${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        } md:translate-x-0 fixed md:static inset-y-0 left-0 z-30 w-72 bg-[#1A0B3D] text-[#FAF6EE] flex flex-col transition-transform shadow-2xl`}
+        } md:translate-x-0 ${
+          sidebarCollapsed ? "md:w-0 md:overflow-hidden md:border-0" : "md:w-72"
+        } fixed md:static inset-y-0 left-0 z-30 w-72 bg-[#1A0B3D] text-[#FAF6EE] flex flex-col transition-all duration-300 shadow-2xl`}
       >
-        {/* Logo */}
-        <div className="px-6 py-6 border-b border-white/10">
-          <div className="flex items-center gap-3">
+        {/* Logo + collapse toggle */}
+        <div className="px-5 py-5 border-b border-white/10 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-3">
             <img
               src="/aluta-logo.png"
               alt="Aluta"
-              className="w-11 h-11 rounded-full ring-2 ring-[#E5B045]/40"
+              className="w-10 h-10 rounded-full ring-2 ring-[#E5B045]/40"
             />
             <div>
               <h1
-                className="text-2xl font-black tracking-tight"
+                className="text-xl font-black tracking-tight"
                 style={{ fontFamily: "Fraunces, serif" }}
               >
                 Aluta
               </h1>
-              <p className="text-xs text-[#E5B045] font-medium tracking-wide">
+              <p className="text-[10px] text-[#E5B045] font-medium tracking-wide">
                 Practice the panic.
               </p>
             </div>
-          </div>
-        </div>
-
-        {/* New session button */}
-        <div className="px-4 py-4 border-b border-white/10">
+          </Link>
           <button
-            onClick={newSession}
-            className="w-full bg-[#E5B045] hover:bg-[#F0C055] text-[#1A0B3D] font-semibold py-2.5 rounded-lg text-sm flex items-center justify-center gap-2 transition-colors"
+            onClick={() => setSidebarCollapsed(true)}
+            className="hidden md:block text-white/40 hover:text-white text-lg"
+            aria-label="Collapse sidebar"
           >
-            <span>+</span>
-            <span>New defence session</span>
+            «
           </button>
         </div>
 
-        {/* Current project */}
+        {/* Modes — at the top */}
         <div className="px-4 py-4 border-b border-white/10">
           <div className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-2">
-            Current project
-          </div>
-          {currentProject ? (
-            <div className="bg-white/5 border border-white/10 rounded-lg p-3">
-              <div className="flex items-start gap-2">
-                <span className="text-lg">📄</span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">
-                    {currentProject.name}
-                  </div>
-                  <div className="text-xs text-white/50 mt-0.5">
-                    Loaded · {messages.length} messages
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="text-xs text-white/40 italic">
-              No project loaded. Upload a PDF or paste your project details to
-              begin.
-            </div>
-          )}
-        </div>
-
-        <div className="px-4 py-4 flex-1 overflow-y-auto">
-          {/* Recent sessions */}
-          {sessions.length > 0 && (
-            <div className="mb-6">
-              <div className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-2">
-                Recent sessions
-              </div>
-              <div className="space-y-1">
-                {sessions.slice(0, 10).map((s) => (
-                  <div
-                    key={s.id}
-                    onClick={() => loadSession(s.id)}
-                    className={`group flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-colors ${
-                      activeId === s.id
-                        ? "bg-[#E5B045]/15 border border-[#E5B045]/30"
-                        : "hover:bg-white/5 border border-transparent"
-                    }`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">
-                        {s.name}
-                      </div>
-                      <div className="text-[10px] text-white/40 mt-0.5">
-                        {formatRelative(s.updatedAt)} · {s.messages.length} msgs
-                      </div>
-                    </div>
-                    <button
-                      onClick={(e) => deleteSession(s.id, e)}
-                      className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-red-400 text-xs ml-2 transition-opacity"
-                      aria-label="Delete session"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Modes */}
-          <div className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-3">
             Modes
           </div>
           <div className="space-y-1.5">
@@ -573,19 +514,97 @@ export default function Home() {
               accent="#E5B045"
               onClick={() => switchMode("tutor")}
             />
-            <ModeRow icon="📖" label="Reading Guide" tag="v2" />
-            <ModeRow icon="📅" label="Scheduler" tag="v2" />
+            <ModeRow icon="📖" label="Reading Guide" tag="Soon" />
+            <ModeRow icon="📅" label="Scheduler" tag="Soon" />
           </div>
+        </div>
+
+        {/* New session */}
+        <div className="px-4 py-4 border-b border-white/10">
+          <button
+            onClick={newSession}
+            className="w-full bg-[#E5B045] hover:bg-[#F0C055] text-[#1A0B3D] font-semibold py-2.5 rounded-lg text-sm flex items-center justify-center gap-2 transition-colors"
+          >
+            <span>+</span>
+            <span>New {mode === "defence" ? "defence" : "tutor"} session</span>
+          </button>
+        </div>
+
+        {/* Current project — defence mode only */}
+        {mode === "defence" && (
+          <div className="px-4 py-4 border-b border-white/10">
+            <div className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-2">
+              Current project
+            </div>
+            {currentProject ? (
+              <div className="bg-white/5 border border-white/10 rounded-lg p-3">
+                <div className="flex items-start gap-2">
+                  <span className="text-lg">📄</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">
+                      {currentProject.name}
+                    </div>
+                    <div className="text-xs text-white/50 mt-0.5">
+                      Loaded · {messages.length} messages
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs text-white/40 italic">
+                No project loaded. Upload a PDF or paste your project details to
+                begin.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* History */}
+        <div className="px-4 py-4 flex-1 overflow-y-auto">
+          <div className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-2">
+            {mode === "defence" ? "Defence" : "Tutor"} history
+          </div>
+          {sessions.length > 0 ? (
+            <div className="space-y-1">
+              {sessions.slice(0, 15).map((s) => (
+                <div
+                  key={s.id}
+                  onClick={() => loadSession(s.id)}
+                  className={`group flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-colors ${
+                    activeId === s.id
+                      ? "bg-[#E5B045]/15 border border-[#E5B045]/30"
+                      : "hover:bg-white/5 border border-transparent"
+                  }`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">{s.name}</div>
+                    <div className="text-[10px] text-white/40 mt-0.5">
+                      {formatRelative(s.updatedAt)}
+                    </div>
+                  </div>
+                  <button
+                    onClick={(e) => deleteSession(s.id, e)}
+                    className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-red-400 text-xs ml-2 transition-opacity"
+                    aria-label="Delete session"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-xs text-white/30 italic">
+              No sessions yet. Start a conversation to see it here.
+            </div>
+          )}
         </div>
 
         {/* Footer */}
         <div className="px-4 py-4 border-t border-white/10">
-          <div className="flex items-center gap-3 mb-3">
+          <div className="flex items-center gap-3">
             <UserButton
               appearance={{
-                elements: {
-                  avatarBox: "w-9 h-9 ring-2 ring-[#E5B045]/40",
-                },
+                elements: { avatarBox: "w-9 h-9 ring-2 ring-[#E5B045]/40" },
               }}
             />
             <div className="text-xs">
@@ -593,17 +612,25 @@ export default function Home() {
               <div className="text-white/40">Click avatar to manage</div>
             </div>
           </div>
-          <div className="text-[10px] text-white/30">Aluta v1</div>
         </div>
       </aside>
 
-      {/* Sidebar toggle (mobile) */}
+      {/* Sidebar toggle — mobile open, desktop expand-when-collapsed */}
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
         className="md:hidden fixed top-4 left-4 z-40 bg-[#1A0B3D] text-[#FAF6EE] p-2 rounded-lg shadow-lg"
       >
         ☰
       </button>
+      {sidebarCollapsed && (
+        <button
+          onClick={() => setSidebarCollapsed(false)}
+          className="hidden md:block fixed top-4 left-4 z-40 bg-[#1A0B3D] text-[#FAF6EE] px-3 py-2 rounded-lg shadow-lg text-sm font-medium"
+          aria-label="Expand sidebar"
+        >
+          » Menu
+        </button>
+      )}
 
       {/* Main area */}
       {/* Main area */}
@@ -619,12 +646,19 @@ export default function Home() {
                 </span>
               </div>
               <h2
-                className="text-xl md:text-2xl font-bold mt-1"
+                className="text-2xl md:text-3xl font-black mt-1"
                 style={{ fontFamily: "Fraunces, serif" }}
               >
-                {mode === "defence"
-                  ? "The External Examiner"
-                  : "Your Study Tutor"}
+                {mode === "defence" ? (
+                  <>
+                    Face the{" "}
+                    <span className="text-[#1A0B3D]">External Examiner</span>
+                  </>
+                ) : (
+                  <>
+                    Your <span className="text-[#1A0B3D]">Study Tutor</span>
+                  </>
+                )}
               </h2>
             </div>
             <div className="hidden md:flex items-center gap-2 bg-[#1A0B3D] text-[#FAF6EE] px-4 py-2 rounded-full text-xs font-medium">
