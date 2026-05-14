@@ -1,6 +1,6 @@
-import { SignUp } from "@clerk/nextjs";
+import { SignIn } from "@clerk/nextjs";
 
-export default function SignUpPage() {
+export default function SignInPage() {
   return (
     <div
       className="min-h-screen flex items-center justify-center bg-[#FAF6EE] p-4"
@@ -17,13 +17,13 @@ export default function SignUpPage() {
             className="text-3xl font-black text-[#1A0B3D]"
             style={{ fontFamily: "Fraunces, serif" }}
           >
-            Create your account
+            Welcome back
           </h1>
           <p className="text-sm text-[#1A0B3D]/60 mt-1">
-            Start rehearsing your defence today.
+            Practice the panic. Pass the panel.
           </p>
         </div>
-        <SignUp />
+        <SignIn />
       </div>
     </div>
   );

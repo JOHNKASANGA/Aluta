@@ -24,13 +24,6 @@ type Session = {
   updatedAt: number;
 };
 
-const STORAGE_KEY = "aluta:sessions";
-const ACTIVE_KEY = "aluta:active";
-
-function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-}
-
 function deriveSessionName(messages: Message[]): string {
   const firstUser = messages.find((m) => m.role === "user");
   if (!firstUser) return "New session";
@@ -72,75 +65,40 @@ export default function Home() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, loading]);
 
-  // Load sessions on mount
+  // Load session list on mount
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const stored: Session[] = raw ? JSON.parse(raw) : [];
-      setSessions(stored);
-      const active = localStorage.getItem(ACTIVE_KEY);
-      if (active && stored.find((s) => s.id === active)) {
-        setActiveId(active);
-        const found = stored.find((s) => s.id === active);
-        if (found) setMessages(found.messages);
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch("/api/sessions");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        setSessions(
+          (data.sessions || []).map(
+            (s: {
+              id: string;
+              name: string;
+              created_at: string;
+              updated_at: string;
+            }) => ({
+              id: s.id,
+              name: s.name,
+              messages: [],
+              createdAt: new Date(s.created_at).getTime(),
+              updatedAt: new Date(s.updated_at).getTime(),
+            }),
+          ),
+        );
+      } catch (e) {
+        console.error("Failed to load sessions", e);
       }
-    } catch (e) {
-      console.error("Failed to load sessions", e);
     }
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-  // Save sessions whenever messages change
-  useEffect(() => {
-    if (messages.length === 0) return;
-    let id = activeId;
-    let updated: Session[];
-    const now = Date.now();
-    if (!id) {
-      // Create new session
-      id = generateId();
-      const newSession: Session = {
-        id,
-        name: deriveSessionName(messages),
-        messages,
-        createdAt: now,
-        updatedAt: now,
-      };
-      updated = [newSession, ...sessions];
-      setActiveId(id);
-      localStorage.setItem(ACTIVE_KEY, id);
-    } else {
-      // Update existing session
-      updated = sessions.map((s) =>
-        s.id === id
-          ? {
-              ...s,
-              messages,
-              name: deriveSessionName(messages),
-              updatedAt: now,
-            }
-          : s,
-      );
-      if (!updated.find((s) => s.id === id)) {
-        updated = [
-          {
-            id,
-            name: deriveSessionName(messages),
-            messages,
-            createdAt: now,
-            updatedAt: now,
-          },
-          ...updated,
-        ];
-      }
-    }
-    setSessions(updated);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.error("Failed to save sessions", e);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages]);
   // Derive current project from first user message attachment
   const currentProject = messages.find(
     (m) => m.role === "user" && m.attachments && m.attachments.length > 0,
@@ -237,6 +195,7 @@ export default function Home() {
     setError("");
 
     try {
+      // Get Claude's reply
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -244,7 +203,72 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Request failed");
-      setMessages([...newMessages, { role: "assistant", content: data.reply }]);
+
+      const assistantMessage: Message = {
+        role: "assistant",
+        content: data.reply,
+      };
+      const updatedMessages = [...newMessages, assistantMessage];
+      setMessages(updatedMessages);
+
+      // Save to Supabase
+      let sessionId = activeId;
+      if (!sessionId) {
+        // Create new session in DB
+        const sessionName = deriveSessionName(updatedMessages);
+        const createRes = await fetch("/api/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: sessionName }),
+        });
+        if (!createRes.ok) throw new Error("Could not create session");
+        const created = await createRes.json();
+        sessionId = created.session.id;
+        setActiveId(sessionId);
+
+        // Add to sidebar list immediately
+        setSessions((prev) => [
+          {
+            id: sessionId!,
+            name: sessionName,
+            messages: [],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+          ...prev,
+        ]);
+
+        // Save BOTH messages (the user one + Claude's reply)
+        await fetch(`/api/sessions/${sessionId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [userMessage, assistantMessage],
+          }),
+        });
+      } else {
+        // Append to existing session
+        await fetch(`/api/sessions/${sessionId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [userMessage, assistantMessage],
+          }),
+        });
+
+        // Bump in sidebar
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === sessionId
+              ? {
+                  ...s,
+                  updatedAt: Date.now(),
+                  name: deriveSessionName(updatedMessages),
+                }
+              : s,
+          ),
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
@@ -265,30 +289,43 @@ export default function Home() {
     setPendingAttachments([]);
     setError("");
     setActiveId(null);
-    localStorage.removeItem(ACTIVE_KEY);
   }
 
-  function loadSession(id: string) {
-    const s = sessions.find((x) => x.id === id);
-    if (!s) return;
-    setMessages(s.messages);
-    setActiveId(id);
-    setInput("");
-    setPendingAttachments([]);
-    setError("");
-    localStorage.setItem(ACTIVE_KEY, id);
-    setSidebarOpen(false);
+  async function loadSession(id: string) {
+    try {
+      const res = await fetch(`/api/sessions/${id}`);
+      if (!res.ok) throw new Error("Could not load session");
+      const data = await res.json();
+      const loadedMessages: Message[] = (data.messages || []).map(
+        (m: { role: string; content: string; attachments: unknown }) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+          attachments: (m.attachments as Message["attachments"]) || undefined,
+        }),
+      );
+      setMessages(loadedMessages);
+      setActiveId(id);
+      setInput("");
+      setPendingAttachments([]);
+      setError("");
+      setSidebarOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load session");
+    }
   }
 
-  function deleteSession(id: string, e: React.MouseEvent) {
+  async function deleteSession(id: string, e: React.MouseEvent) {
     e.stopPropagation();
-    const updated = sessions.filter((s) => s.id !== id);
-    setSessions(updated);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    if (activeId === id) {
-      setMessages([]);
-      setActiveId(null);
-      localStorage.removeItem(ACTIVE_KEY);
+    try {
+      const res = await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Could not delete");
+      setSessions((prev) => prev.filter((s) => s.id !== id));
+      if (activeId === id) {
+        setMessages([]);
+        setActiveId(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete");
     }
   }
 
