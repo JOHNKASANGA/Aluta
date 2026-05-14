@@ -46,6 +46,13 @@ function formatRelative(ts: number): string {
   if (day < 7) return `${day}d ago`;
   return new Date(ts).toLocaleDateString();
 }
+function getTimeGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  if (h < 21) return "Good evening";
+  return "Working late";
+}
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -54,6 +61,8 @@ export default function Home() {
   const [error, setError] = useState("");
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [mode, setMode] = useState<"defence" | "tutor">("defence");
+  const [greeting, setGreeting] = useState("Hello");
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>(
     [],
   );
@@ -65,12 +74,16 @@ export default function Home() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, loading]);
 
+  useEffect(() => {
+    setGreeting(getTimeGreeting());
+  }, []);
   // Load session list on mount
+  // Load session list whenever mode changes
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
-        const res = await fetch("/api/sessions");
+        const res = await fetch(`/api/sessions?mode=${mode}`);
         if (!res.ok) return;
         const data = await res.json();
         if (cancelled) return;
@@ -98,7 +111,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [mode]);
   // Derive current project from first user message attachment
   const currentProject = messages.find(
     (m) => m.role === "user" && m.attachments && m.attachments.length > 0,
@@ -199,7 +212,7 @@ export default function Home() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "defence", messages: newMessages }),
+        body: JSON.stringify({ mode, messages: newMessages }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Request failed");
@@ -219,7 +232,7 @@ export default function Home() {
         const createRes = await fetch("/api/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: sessionName }),
+          body: JSON.stringify({ name: sessionName, mode }),
         });
         if (!createRes.ok) throw new Error("Could not create session");
         const created = await createRes.json();
@@ -291,6 +304,17 @@ export default function Home() {
     setActiveId(null);
   }
 
+  function switchMode(newMode: "defence" | "tutor") {
+    if (newMode === mode) return;
+    setMode(newMode);
+    setMessages([]);
+    setInput("");
+    setPendingAttachments([]);
+    setError("");
+    setActiveId(null);
+    setSidebarOpen(false);
+  }
+
   async function loadSession(id: string) {
     try {
       const res = await fetch(`/api/sessions/${id}`);
@@ -327,6 +351,95 @@ export default function Home() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete");
     }
+  }
+
+  function renderInputBox() {
+    return (
+      <>
+        {error && (
+          <div className="bg-red-50 border-l-4 border-red-500 text-red-800 rounded-r-lg px-4 py-3 text-sm mb-2">
+            <span className="font-semibold">Error:</span> {error}
+          </div>
+        )}
+        {pendingAttachments.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {pendingAttachments.map((att, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 bg-[#1A0B3D]/5 text-[#1A0B3D] px-3 py-1.5 rounded-lg text-xs border border-[#1A0B3D]/15"
+              >
+                <span>
+                  {att.type === "pdf"
+                    ? "📄"
+                    : att.type === "image"
+                      ? "🖼️"
+                      : "📝"}
+                </span>
+                <span className="max-w-[180px] truncate font-medium">
+                  {att.name}
+                </span>
+                <button
+                  onClick={() =>
+                    setPendingAttachments((prev) =>
+                      prev.filter((_, idx) => idx !== i),
+                    )
+                  }
+                  className="text-[#1A0B3D]/40 hover:text-[#1A0B3D] font-bold ml-1"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="bg-white border-2 border-[#1A0B3D]/10 focus-within:border-[#E5B045]/60 rounded-3xl p-3 shadow-lg transition-all">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKey}
+            placeholder={
+              mode === "defence"
+                ? "Paste your project, or attach a PDF to begin..."
+                : "What topic or problem are you working on?"
+            }
+            rows={2}
+            className="w-full bg-transparent text-sm text-[#1A1033] placeholder-[#1A0B3D]/40 focus:outline-none resize-none px-2 py-1"
+          />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf,image/*,.docx,.txt,.md"
+            multiple
+            onChange={(e) => handleFiles(e.target.files)}
+            className="hidden"
+          />
+          <div className="flex items-center justify-between pt-2 border-t border-[#1A0B3D]/10">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="text-[#1A0B3D]/60 hover:text-[#1A0B3D] text-sm flex items-center gap-1.5 px-2 font-medium"
+            >
+              <span>📎</span>
+              <span>Attach</span>
+            </button>
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] text-[#1A0B3D]/40 hidden md:inline">
+                Enter to send · Shift + Enter for new line
+              </span>
+              <button
+                onClick={send}
+                disabled={
+                  loading || (!input.trim() && pendingAttachments.length === 0)
+                }
+                className="bg-[#1A0B3D] hover:bg-[#2D1762] text-[#FAF6EE] px-5 py-2 rounded-xl text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+              >
+                Send
+                <span>→</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </>
+    );
   }
 
   return (
@@ -447,11 +560,19 @@ export default function Home() {
             <ModeRow
               icon="🛡️"
               label="Defence"
-              tag="Active"
-              active
+              tag={mode === "defence" ? "Active" : ""}
+              active={mode === "defence"}
               accent="#E5B045"
+              onClick={() => switchMode("defence")}
             />
-            <ModeRow icon="📚" label="Tutor" tag="v2" />
+            <ModeRow
+              icon="📚"
+              label="Tutor"
+              tag={mode === "tutor" ? "Active" : ""}
+              active={mode === "tutor"}
+              accent="#E5B045"
+              onClick={() => switchMode("tutor")}
+            />
             <ModeRow icon="📖" label="Reading Guide" tag="v2" />
             <ModeRow icon="📅" label="Scheduler" tag="v2" />
           </div>
@@ -485,277 +606,159 @@ export default function Home() {
       </button>
 
       {/* Main area */}
+      {/* Main area */}
       <main className="flex-1 flex flex-col min-w-0 h-screen">
         {/* Top bar */}
-        <header className="border-b border-[#1A0B3D]/10 bg-[#FAF6EE]/80 backdrop-blur-sm px-6 md:px-10 py-4 sticky top-0 z-20">
+        <header className="border-b border-[#1A0B3D]/10 bg-[#FAF6EE]/80 backdrop-blur-sm px-6 md:px-10 py-4 z-20 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div>
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-[#E5B045] animate-pulse"></span>
                 <span className="text-xs uppercase tracking-widest text-[#1A0B3D]/60 font-bold">
-                  Defence Mode
+                  {mode === "defence" ? "Defence Mode" : "Tutor Mode"}
                 </span>
               </div>
               <h2
-                className="text-2xl md:text-3xl font-bold mt-1"
+                className="text-xl md:text-2xl font-bold mt-1"
                 style={{ fontFamily: "Fraunces, serif" }}
               >
-                The External Examiner
+                {mode === "defence"
+                  ? "The External Examiner"
+                  : "Your Study Tutor"}
               </h2>
             </div>
             <div className="hidden md:flex items-center gap-2 bg-[#1A0B3D] text-[#FAF6EE] px-4 py-2 rounded-full text-xs font-medium">
-              <span>🎓</span>
-              <span>Pass the panel</span>
+              <span>{mode === "defence" ? "🎓" : "📚"}</span>
+              <span>
+                {mode === "defence"
+                  ? "Pass the panel"
+                  : "Actually understand it"}
+              </span>
             </div>
           </div>
         </header>
 
-        {/* Chat / hero area */}
-        <div
-          ref={scrollRef}
-          className="flex-1 overflow-y-auto px-6 md:px-10 py-6"
-        >
-          {messages.length === 0 && (
-            <div className="max-w-3xl mx-auto">
-              {/* Hero card */}
-              <div className="bg-gradient-to-br from-[#1A0B3D] to-[#2D1762] text-[#FAF6EE] rounded-3xl p-8 md:p-10 shadow-xl relative overflow-hidden mb-6">
-                {/* Decorative element */}
-                <div className="absolute -top-12 -right-12 w-48 h-48 rounded-full bg-[#E5B045]/20 blur-3xl"></div>
-                <div className="absolute -bottom-10 -left-10 w-40 h-40 rounded-full bg-[#E5B045]/10 blur-2xl"></div>
-
-                <div className="relative">
-                  <div className="inline-flex items-center gap-2 bg-[#E5B045]/20 text-[#E5B045] px-3 py-1 rounded-full text-xs font-semibold mb-4">
-                    <span>🛡️</span>
-                    <span>Headline Feature</span>
-                  </div>
-                  <h3
-                    className="text-3xl md:text-4xl font-black leading-tight mb-3"
-                    style={{ fontFamily: "Fraunces, serif" }}
-                  >
-                    Rehearse your defence.
-                    <br />
-                    Walk in ready.
-                  </h3>
-                  <p className="text-[#FAF6EE]/80 text-base leading-relaxed max-w-xl">
-                    Aluta plays your external examiner. It reads your project,
-                    asks the hard questions, catches contradictions, and tells
-                    you exactly what to fix.
-                  </p>
-                </div>
-              </div>
-
-              {/* Feature row */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-                <FeatureTile
-                  num="01"
-                  title="Share your work"
-                  body="Upload your project PDF, .docx, or paste your details."
-                />
-                <FeatureTile
-                  num="02"
-                  title="Get questioned"
-                  body="Aluta probes for weaknesses chapter by chapter."
-                />
-                <FeatureTile
-                  num="03"
-                  title="Walk in ready"
-                  body="A verdict and three things to fix before the real defence."
-                />
-              </div>
-
-              {/* Prompt suggestion */}
-              <div className="bg-white border-2 border-dashed border-[#1A0B3D]/15 rounded-2xl p-5">
-                <div className="text-[10px] uppercase tracking-widest text-[#1A0B3D]/50 font-bold mb-2">
-                  Try this to start
-                </div>
-                <div
-                  className="text-sm text-[#1A1033] italic leading-relaxed"
-                  style={{ fontFamily: "Fraunces, serif" }}
-                >
-                  &ldquo;My project is titled [title]. My research questions are
-                  [questions]. I used [methodology]. My main finding is
-                  [finding].&rdquo;
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Messages */}
-          <div className="max-w-3xl mx-auto space-y-5">
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                className={`flex gap-3 ${
-                  m.role === "user" ? "flex-row-reverse" : ""
-                }`}
+        {messages.length === 0 ? (
+          /* EMPTY STATE — centered greeting + input on themed background */
+          <div className="flex-1 flex flex-col items-center justify-center px-6 overflow-y-auto">
+            <div className="w-full max-w-2xl text-center mb-8">
+              <h1
+                className="text-3xl md:text-4xl font-black text-[#1A0B3D] mb-2"
+                style={{ fontFamily: "Fraunces, serif" }}
               >
-                {m.role === "user" ? (
-                  <div className="w-10 h-10 rounded-full bg-[#E5B045] flex items-center justify-center text-[#1A0B3D] text-xs font-bold flex-shrink-0 shadow-sm">
-                    YOU
-                  </div>
-                ) : (
-                  <img
-                    src="/aluta-logo.png"
-                    alt="Examiner"
-                    className="w-10 h-10 rounded-full flex-shrink-0 shadow-sm ring-2 ring-[#E5B045]/30"
-                  />
-                )}
-                <div
-                  className={`max-w-[80%] rounded-2xl px-5 py-4 text-sm leading-relaxed shadow-sm ${
-                    m.role === "user"
-                      ? "bg-[#1A0B3D] text-[#FAF6EE] rounded-tr-sm"
-                      : "bg-white text-[#1A1033] border border-[#1A0B3D]/10 rounded-tl-sm"
-                  }`}
-                >
-                  {m.role === "assistant" && (
-                    <div className="text-[10px] uppercase tracking-widest font-bold text-[#1A0B3D]/60 mb-2">
-                      External Examiner
-                    </div>
-                  )}
-                  {m.attachments && m.attachments.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mb-2">
-                      {m.attachments.map((att, idx) => (
-                        <div
-                          key={idx}
-                          className={`text-xs px-2.5 py-1 rounded-md flex items-center gap-1.5 ${
-                            m.role === "user"
-                              ? "bg-white/15 text-[#FAF6EE]"
-                              : "bg-[#1A0B3D]/5 text-[#1A0B3D]"
-                          }`}
-                        >
-                          <span>
-                            {att.type === "pdf"
-                              ? "📄"
-                              : att.type === "image"
-                                ? "🖼️"
-                                : "📝"}
-                          </span>
-                          <span className="max-w-[140px] truncate">
-                            {att.name}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="whitespace-pre-wrap">{m.content}</div>
-                </div>
-              </div>
-            ))}
-
-            {loading && (
-              <div className="flex gap-3">
-                <img
-                  src="/aluta-logo.png"
-                  alt="Examiner"
-                  className="w-10 h-10 rounded-full ring-2 ring-[#E5B045]/30 shadow-sm"
-                />
-                <div className="bg-white border border-[#1A0B3D]/10 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm">
-                  <div className="flex gap-1.5">
-                    <span className="w-2 h-2 bg-[#1A0B3D] rounded-full animate-bounce"></span>
-                    <span
-                      className="w-2 h-2 bg-[#1A0B3D] rounded-full animate-bounce"
-                      style={{ animationDelay: "0.15s" }}
-                    ></span>
-                    <span
-                      className="w-2 h-2 bg-[#1A0B3D] rounded-full animate-bounce"
-                      style={{ animationDelay: "0.3s" }}
-                    ></span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {error && (
-              <div className="bg-red-50 border-l-4 border-red-500 text-red-800 rounded-r-lg px-4 py-3 text-sm">
-                <span className="font-semibold">Error:</span> {error}
-              </div>
-            )}
+                {greeting}.
+              </h1>
+              <p className="text-[#1A0B3D]/60 text-base">
+                {mode === "defence"
+                  ? "Share your project and let's rehearse your defence."
+                  : "Tell me what you're studying and where you're stuck."}
+              </p>
+            </div>
+            <div className="w-full max-w-2xl bounce-in">{renderInputBox()}</div>
+            <div className="text-xs text-[#1A0B3D]/40 mt-4 text-center max-w-md">
+              {mode === "defence"
+                ? "Upload your project PDF or paste your title, methodology, and findings."
+                : "Ask about any topic. I'll find out where your understanding breaks down first."}
+            </div>
           </div>
-        </div>
-
-        {/* Input bar */}
-        <div className="border-t border-[#1A0B3D]/10 bg-white px-6 md:px-10 py-4">
-          <div className="max-w-3xl mx-auto">
-            {pendingAttachments.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {pendingAttachments.map((att, i) => (
+        ) : (
+          /* ACTIVE STATE — messages scroll, input pinned at the bottom */
+          <>
+            <div
+              ref={scrollRef}
+              className="flex-1 overflow-y-auto px-6 md:px-10 py-6"
+            >
+              <div className="max-w-3xl mx-auto space-y-5">
+                {messages.map((m, i) => (
                   <div
                     key={i}
-                    className="flex items-center gap-2 bg-[#1A0B3D]/5 text-[#1A0B3D] px-3 py-1.5 rounded-lg text-xs border border-[#1A0B3D]/15"
+                    className={`flex gap-3 ${
+                      m.role === "user" ? "flex-row-reverse" : ""
+                    }`}
                   >
-                    <span>
-                      {att.type === "pdf"
-                        ? "📄"
-                        : att.type === "image"
-                          ? "🖼️"
-                          : "📝"}
-                    </span>
-                    <span className="max-w-[180px] truncate font-medium">
-                      {att.name}
-                    </span>
-                    <button
-                      onClick={() =>
-                        setPendingAttachments((prev) =>
-                          prev.filter((_, idx) => idx !== i),
-                        )
-                      }
-                      className="text-[#1A0B3D]/40 hover:text-[#1A0B3D] font-bold ml-1"
+                    {m.role === "user" ? (
+                      <div className="w-10 h-10 rounded-full bg-[#E5B045] flex items-center justify-center text-[#1A0B3D] text-xs font-bold flex-shrink-0 shadow-sm">
+                        YOU
+                      </div>
+                    ) : (
+                      <img
+                        src="/aluta-logo.png"
+                        alt="Aluta"
+                        className="w-10 h-10 rounded-full flex-shrink-0 shadow-sm ring-2 ring-[#E5B045]/30"
+                      />
+                    )}
+                    <div
+                      className={`max-w-[80%] rounded-2xl px-5 py-4 text-sm leading-relaxed shadow-sm ${
+                        m.role === "user"
+                          ? "bg-[#1A0B3D] text-[#FAF6EE] rounded-tr-sm"
+                          : "bg-white text-[#1A1033] border border-[#1A0B3D]/10 rounded-tl-sm"
+                      }`}
                     >
-                      ×
-                    </button>
+                      {m.role === "assistant" && (
+                        <div className="text-[10px] uppercase tracking-widest font-bold text-[#1A0B3D]/60 mb-2">
+                          {mode === "defence" ? "External Examiner" : "Tutor"}
+                        </div>
+                      )}
+                      {m.attachments && m.attachments.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          {m.attachments.map((att, idx) => (
+                            <div
+                              key={idx}
+                              className={`text-xs px-2.5 py-1 rounded-md flex items-center gap-1.5 ${
+                                m.role === "user"
+                                  ? "bg-white/15 text-[#FAF6EE]"
+                                  : "bg-[#1A0B3D]/5 text-[#1A0B3D]"
+                              }`}
+                            >
+                              <span>
+                                {att.type === "pdf"
+                                  ? "📄"
+                                  : att.type === "image"
+                                    ? "🖼️"
+                                    : "📝"}
+                              </span>
+                              <span className="max-w-[140px] truncate">
+                                {att.name}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="whitespace-pre-wrap">{m.content}</div>
+                    </div>
                   </div>
                 ))}
-              </div>
-            )}
-            <div className="bg-[#FAF6EE] border-2 border-[#1A0B3D]/10 focus-within:border-[#1A0B3D]/30 rounded-2xl p-3 transition-colors">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKey}
-                placeholder={
-                  messages.length > 0
-                    ? "Defend your answer..."
-                    : "Paste your project, or attach a PDF to begin..."
-                }
-                rows={2}
-                className="w-full bg-transparent text-sm text-[#1A1033] placeholder-[#1A0B3D]/40 focus:outline-none resize-none px-2 py-1"
-              />
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="application/pdf,image/*,.docx,.txt,.md"
-                multiple
-                onChange={(e) => handleFiles(e.target.files)}
-                className="hidden"
-              />
-              <div className="flex items-center justify-between pt-2 border-t border-[#1A0B3D]/10">
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="text-[#1A0B3D]/60 hover:text-[#1A0B3D] text-sm flex items-center gap-1.5 px-2 font-medium"
-                >
-                  <span>📎</span>
-                  <span>Attach</span>
-                </button>
-                <div className="flex items-center gap-3">
-                  <span className="text-[10px] text-[#1A0B3D]/40 hidden md:inline">
-                    Enter to send · Shift + Enter for new line
-                  </span>
-                  <button
-                    onClick={send}
-                    disabled={
-                      loading ||
-                      (!input.trim() && pendingAttachments.length === 0)
-                    }
-                    className="bg-[#1A0B3D] hover:bg-[#2D1762] text-[#FAF6EE] px-5 py-2 rounded-xl text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-                  >
-                    Send
-                    <span>→</span>
-                  </button>
-                </div>
+
+                {loading && (
+                  <div className="flex gap-3">
+                    <img
+                      src="/aluta-logo.png"
+                      alt="Aluta"
+                      className="w-10 h-10 rounded-full ring-2 ring-[#E5B045]/30 shadow-sm"
+                    />
+                    <div className="bg-white border border-[#1A0B3D]/10 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm">
+                      <div className="flex gap-1.5">
+                        <span className="w-2 h-2 bg-[#1A0B3D] rounded-full animate-bounce"></span>
+                        <span
+                          className="w-2 h-2 bg-[#1A0B3D] rounded-full animate-bounce"
+                          style={{ animationDelay: "0.15s" }}
+                        ></span>
+                        <span
+                          className="w-2 h-2 bg-[#1A0B3D] rounded-full animate-bounce"
+                          style={{ animationDelay: "0.3s" }}
+                        ></span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-          </div>
-        </div>
+
+            <div className="border-t border-[#1A0B3D]/10 bg-[#FAF6EE] px-6 md:px-10 py-4 flex-shrink-0">
+              <div className="max-w-3xl mx-auto">{renderInputBox()}</div>
+            </div>
+          </>
+        )}
       </main>
     </div>
   );
@@ -767,31 +770,36 @@ function ModeRow({
   tag,
   active = false,
   accent = "#E5B045",
+  onClick,
 }: {
   icon: string;
   label: string;
   tag: string;
   active?: boolean;
   accent?: string;
+  onClick?: () => void;
 }) {
   return (
     <div
+      onClick={onClick}
       className={`flex items-center justify-between px-3 py-2 rounded-lg ${
-        active ? "bg-white/10" : "opacity-50"
-      }`}
+        onClick ? "cursor-pointer" : ""
+      } ${active ? "bg-white/10" : onClick ? "hover:bg-white/5" : "opacity-50"}`}
     >
       <div className="flex items-center gap-2.5">
         <span className="text-base">{icon}</span>
         <span className="text-sm font-medium">{label}</span>
       </div>
-      <span
-        className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
-          active ? "" : "text-white/40 border border-white/20"
-        }`}
-        style={active ? { backgroundColor: accent, color: "#1A0B3D" } : {}}
-      >
-        {tag}
-      </span>
+      {tag && (
+        <span
+          className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
+            active ? "" : "text-white/40 border border-white/20"
+          }`}
+          style={active ? { backgroundColor: accent, color: "#1A0B3D" } : {}}
+        >
+          {tag}
+        </span>
+      )}
     </div>
   );
 }
