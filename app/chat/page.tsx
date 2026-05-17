@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
+import { useVoice } from "@/lib/useVoice";
 
 type Attachment = {
   type: "pdf" | "image" | "text";
@@ -60,6 +61,10 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [voiceMode, setVoiceMode] = useState(false);
+  const messagesRef = useRef<Message[]>([]);
+  const activeIdRef = useRef<string | null>(null);
+  const voiceTurnRef = useRef<(t: string) => void>(() => {});
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [mode, setMode] = useState<"defence" | "tutor">("defence");
@@ -81,10 +86,35 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    voiceTurnRef.current = handleVoiceTurn;
+  });
+
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const m = params.get("mode");
     if (m === "tutor" || m === "defence") setMode(m);
   }, []);
+
+  const {
+    state: voiceState,
+    interimTranscript,
+    supported: voiceSupported,
+    permissionDenied,
+    startListening,
+    stopListening,
+    speak,
+    reset: resetVoice,
+  } = useVoice({
+    onUserSpoke: (t) => voiceTurnRef.current(t),
+  });
   // Load session list on mount
   // Load session list whenever mode changes
   useEffect(() => {
@@ -199,6 +229,74 @@ export default function Home() {
     setPendingAttachments((prev) => [...prev, ...newAttachments]);
   }
 
+  async function handleVoiceTurn(transcript: string) {
+    const userMessage: Message = { role: "user", content: transcript };
+    const newMessages: Message[] = [...messagesRef.current, userMessage];
+    setMessages(newMessages);
+    setError("");
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "defence", messages: newMessages }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Request failed");
+
+      const assistantMessage: Message = {
+        role: "assistant",
+        content: data.reply,
+      };
+      const updatedMessages = [...newMessages, assistantMessage];
+      setMessages(updatedMessages);
+
+      // Persist to Supabase
+      let sessionId = activeIdRef.current;
+      if (!sessionId) {
+        const sessionName = deriveSessionName(updatedMessages);
+        const createRes = await fetch("/api/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: sessionName, mode: "defence" }),
+        });
+        if (createRes.ok) {
+          const created = await createRes.json();
+          sessionId = created.session.id;
+          setActiveId(sessionId);
+          setSessions((prev) => [
+            {
+              id: sessionId!,
+              name: sessionName,
+              messages: [],
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            },
+            ...prev,
+          ]);
+          await fetch(`/api/sessions/${sessionId}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: [userMessage, assistantMessage],
+            }),
+          });
+        }
+      } else {
+        await fetch(`/api/sessions/${sessionId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: [userMessage, assistantMessage] }),
+        });
+      }
+
+      // Speak the examiner's reply
+      speak(data.reply);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
+      resetVoice();
+    }
+  }
   async function send() {
     if ((!input.trim() && pendingAttachments.length === 0) || loading) return;
 
@@ -493,11 +591,11 @@ export default function Home() {
         </div>
 
         {/* Modes — at the top */}
-        <div className="px-4 py-4 border-b border-white/10">
-          <div className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-2">
+        <div className="px-4 py-3 border-b border-white/10">
+          <div className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-1.5">
             Modes
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-0.5">
             <ModeRow
               icon="🛡️"
               label="Defence"
@@ -661,13 +759,24 @@ export default function Home() {
                 )}
               </h2>
             </div>
-            <div className="hidden md:flex items-center gap-2 bg-[#1A0B3D] text-[#FAF6EE] px-4 py-2 rounded-full text-xs font-medium">
-              <span>{mode === "defence" ? "🎓" : "📚"}</span>
-              <span>
-                {mode === "defence"
-                  ? "Pass the panel"
-                  : "Actually understand it"}
-              </span>
+            <div className="flex items-center gap-2">
+              {mode === "defence" && (
+                <button
+                  onClick={() => setVoiceMode(true)}
+                  className="flex items-center gap-2 bg-[#E5B045] hover:bg-[#F0C055] text-[#1A0B3D] px-4 py-2 rounded-full text-xs font-bold transition-colors"
+                >
+                  <span>🎙️</span>
+                  <span>Voice Defence</span>
+                </button>
+              )}
+              <div className="hidden md:flex items-center gap-2 bg-[#1A0B3D] text-[#FAF6EE] px-4 py-2 rounded-full text-xs font-medium">
+                <span>{mode === "defence" ? "🎓" : "📚"}</span>
+                <span>
+                  {mode === "defence"
+                    ? "Pass the panel"
+                    : "Actually understand it"}
+                </span>
+              </div>
             </div>
           </div>
         </header>
@@ -793,6 +902,114 @@ export default function Home() {
             </div>
           </>
         )}
+        {/* Voice Defence overlay */}
+        {voiceMode && (
+          <div className="fixed inset-0 z-50 bg-[#1A0B3D] flex flex-col items-center justify-center px-6">
+            {/* Decorative glows */}
+            <div className="absolute top-1/4 left-1/4 w-72 h-72 rounded-full bg-[#E5B045]/10 blur-3xl"></div>
+            <div className="absolute bottom-1/4 right-1/4 w-72 h-72 rounded-full bg-[#E5B045]/10 blur-3xl"></div>
+
+            <div className="relative flex flex-col items-center text-center max-w-lg w-full">
+              <div className="text-[10px] uppercase tracking-widest text-[#E5B045] font-bold mb-8">
+                Voice Defence · The External Examiner
+              </div>
+
+              {/* Orb */}
+              <div className="relative w-44 h-44 mb-8 flex items-center justify-center">
+                {voiceState === "listening" && (
+                  <span className="absolute inset-0 rounded-full bg-[#E5B045]/30 animate-ping"></span>
+                )}
+                {voiceState === "speaking" && (
+                  <span className="absolute inset-0 rounded-full bg-[#E5B045]/20 animate-pulse"></span>
+                )}
+                <div
+                  className={`w-36 h-36 rounded-full flex items-center justify-center transition-all duration-300 ${
+                    voiceState === "listening"
+                      ? "bg-[#E5B045] scale-110"
+                      : voiceState === "speaking"
+                        ? "bg-[#E5B045]/80 scale-105"
+                        : voiceState === "thinking"
+                          ? "bg-white/10"
+                          : "bg-white/5"
+                  }`}
+                >
+                  <img
+                    src="/aluta-logo.png"
+                    alt="Aluta"
+                    className="w-24 h-24 rounded-full"
+                  />
+                </div>
+              </div>
+
+              {/* Status */}
+              <div className="text-[#FAF6EE] text-lg font-semibold mb-2">
+                {voiceState === "idle" && "Tap the mic to respond"}
+                {voiceState === "listening" && "Listening..."}
+                {voiceState === "thinking" && "The examiner is considering..."}
+                {voiceState === "speaking" && "The examiner is speaking..."}
+              </div>
+
+              {/* Interim transcript */}
+              <div className="text-[#FAF6EE]/60 text-sm min-h-[3rem] mb-6 italic">
+                {interimTranscript ||
+                  (messages.length === 0 && voiceState === "idle"
+                    ? "Start by stating your project title and main findings."
+                    : "")}
+              </div>
+
+              {!voiceSupported && (
+                <div className="text-red-300 text-sm mb-4">
+                  Voice isn&apos;t supported in this browser. Try Chrome, Edge,
+                  or Brave.
+                </div>
+              )}
+              {permissionDenied && (
+                <div className="text-red-300 text-sm mb-4">
+                  Microphone access was denied. Enable it in your browser
+                  settings.
+                </div>
+              )}
+
+              {/* Mic button */}
+              <button
+                onClick={() => {
+                  if (voiceState === "idle") startListening();
+                  else if (voiceState === "listening") stopListening();
+                }}
+                disabled={
+                  !voiceSupported ||
+                  voiceState === "thinking" ||
+                  voiceState === "speaking"
+                }
+                className={`w-20 h-20 rounded-full flex items-center justify-center text-3xl transition-all disabled:opacity-30 ${
+                  voiceState === "listening"
+                    ? "bg-red-500 text-white"
+                    : "bg-[#E5B045] text-[#1A0B3D]"
+                }`}
+              >
+                {voiceState === "listening" ? "■" : "🎙️"}
+              </button>
+              <div className="text-[#FAF6EE]/40 text-xs mt-3">
+                {voiceState === "listening"
+                  ? "Tap to stop and send"
+                  : voiceState === "idle"
+                    ? "Tap to speak"
+                    : "Please wait"}
+              </div>
+
+              {/* End */}
+              <button
+                onClick={() => {
+                  resetVoice();
+                  setVoiceMode(false);
+                }}
+                className="mt-10 text-[#FAF6EE]/60 hover:text-[#FAF6EE] text-sm font-medium border border-white/20 hover:border-white/40 px-5 py-2 rounded-full transition-colors"
+              >
+                End voice session
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
@@ -815,8 +1032,7 @@ function ModeRow({
 }) {
   return (
     <div
-      onClick={onClick}
-      className={`flex items-center justify-between px-3 py-2 rounded-lg ${
+      className={`flex items-center justify-between px-3 py-1.5 rounded-lg ${
         onClick ? "cursor-pointer" : ""
       } ${active ? "bg-white/10" : onClick ? "hover:bg-white/5" : "opacity-50"}`}
     >
