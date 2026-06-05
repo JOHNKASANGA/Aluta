@@ -108,6 +108,7 @@ export default function Home() {
     interimTranscript,
     supported: voiceSupported,
     permissionDenied,
+    voiceLevel,
     startListening,
     stopListening,
     speak,
@@ -904,69 +905,148 @@ export default function Home() {
         )}
         {/* Voice Defence overlay */}
         {voiceMode && (
-          <div className="fixed inset-0 z-50 bg-[#1A0B3D] flex flex-col items-center justify-center px-6">
-            {/* Decorative glows */}
-            <div className="absolute top-1/4 left-1/4 w-72 h-72 rounded-full bg-[#E5B045]/10 blur-3xl"></div>
-            <div className="absolute bottom-1/4 right-1/4 w-72 h-72 rounded-full bg-[#E5B045]/10 blur-3xl"></div>
+          <div className="fixed inset-0 z-50 bg-gradient-to-br from-[#1A0B3D] via-[#2D1762] to-[#1A0B3D] flex flex-col items-center justify-center px-6 overflow-hidden">
+            {/* Ambient floating glows */}
+            <div className="voice-glow-1 absolute top-[15%] left-[20%] w-80 h-80 rounded-full bg-[#E5B045]/15 blur-3xl pointer-events-none"></div>
+            <div className="voice-glow-2 absolute bottom-[15%] right-[18%] w-96 h-96 rounded-full bg-[#7C4DFF]/15 blur-3xl pointer-events-none"></div>
+            <div className="voice-glow-1 absolute top-[50%] right-[30%] w-64 h-64 rounded-full bg-[#E5B045]/10 blur-3xl pointer-events-none"></div>
 
-            <div className="relative flex flex-col items-center text-center max-w-lg w-full">
-              <div className="text-[10px] uppercase tracking-widest text-[#E5B045] font-bold mb-8">
-                Voice Defence · The External Examiner
+            <div className="relative flex flex-col items-center text-center max-w-lg w-full fade-up">
+              {/* Header label */}
+              <div className="flex items-center gap-2 mb-10">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#E5B045] animate-pulse"></span>
+                <div className="text-[10px] uppercase tracking-[0.25em] text-[#E5B045] font-bold">
+                  Voice Defence · The External Examiner
+                </div>
+                <span className="w-1.5 h-1.5 rounded-full bg-[#E5B045] animate-pulse"></span>
               </div>
 
-              {/* Orb */}
-              <div className="relative w-44 h-44 mb-8 flex items-center justify-center">
-                {voiceState === "listening" && (
-                  <span className="absolute inset-0 rounded-full bg-[#E5B045]/30 animate-ping"></span>
+              {/* Orb with reactive rings */}
+              <div className="relative w-56 h-56 mb-10 flex items-center justify-center">
+                {/* Expanding rings when listening or speaking */}
+                {(voiceState === "listening" || voiceState === "speaking") && (
+                  <>
+                    <span
+                      className="absolute inset-0 rounded-full border-2 transition-all duration-100"
+                      style={{
+                        borderColor:
+                          voiceState === "listening" ? "#E5B045" : "#7C4DFF",
+                        opacity: 0.4 + voiceLevel * 0.4,
+                        transform: `scale(${1.1 + voiceLevel * 0.6})`,
+                      }}
+                    ></span>
+                    <span
+                      className="absolute inset-0 rounded-full border transition-all duration-100"
+                      style={{
+                        borderColor:
+                          voiceState === "listening" ? "#E5B045" : "#7C4DFF",
+                        opacity: 0.2 + voiceLevel * 0.3,
+                        transform: `scale(${1.3 + voiceLevel * 0.9})`,
+                      }}
+                    ></span>
+                  </>
                 )}
-                {voiceState === "speaking" && (
-                  <span className="absolute inset-0 rounded-full bg-[#E5B045]/20 animate-pulse"></span>
-                )}
+                {/* Rotating gradient halo */}
                 <div
-                  className={`w-36 h-36 rounded-full flex items-center justify-center transition-all duration-300 ${
-                    voiceState === "listening"
-                      ? "bg-[#E5B045] scale-110"
-                      : voiceState === "speaking"
-                        ? "bg-[#E5B045]/80 scale-105"
-                        : voiceState === "thinking"
-                          ? "bg-white/10"
-                          : "bg-white/5"
+                  className={`absolute inset-2 rounded-full transition-opacity duration-500 ${
+                    voiceState === "thinking" ? "opacity-100" : "opacity-0"
                   }`}
+                  style={{
+                    background:
+                      "conic-gradient(from 0deg, transparent, #E5B045, transparent)",
+                    animation: "spin 2s linear infinite",
+                  }}
+                ></div>
+                <div className="text-yellow-400 text-xs">
+                  level: {voiceLevel.toFixed(2)}
+                </div>
+                {/* Core orb — scales with real voice amplitude */}
+                <div
+                  className={`orb-float relative w-40 h-40 rounded-full flex items-center justify-center transition-[box-shadow] duration-300 ${
+                    voiceState === "listening"
+                      ? "shadow-[0_0_60px_rgba(229,176,69,0.6)]"
+                      : voiceState === "speaking"
+                        ? "shadow-[0_0_60px_rgba(124,77,255,0.5)]"
+                        : "shadow-[0_0_40px_rgba(229,176,69,0.2)]"
+                  }`}
+                  style={{
+                    transform: `scale(${
+                      voiceState === "listening" || voiceState === "speaking"
+                        ? 1 + voiceLevel * 0.35
+                        : 1
+                    })`,
+                    transition:
+                      voiceState === "listening" || voiceState === "speaking"
+                        ? "transform 0.08s ease-out, box-shadow 0.3s"
+                        : "transform 0.5s ease, box-shadow 0.3s",
+                    background:
+                      voiceState === "listening"
+                        ? "radial-gradient(circle at 35% 30%, #F0C055, #E5B045)"
+                        : voiceState === "speaking"
+                          ? "radial-gradient(circle at 35% 30%, #9D6DFF, #6B3DE0)"
+                          : "radial-gradient(circle at 35% 30%, rgba(255,255,255,0.12), rgba(255,255,255,0.04))",
+                  }}
                 >
-                  <img
-                    src="/aluta-logo.png"
-                    alt="Aluta"
-                    className="w-24 h-24 rounded-full"
-                  />
+                  {voiceState === "speaking" ? (
+                    <div className="flex items-end gap-1.5 h-16">
+                      {[0, 1, 2, 3, 4].map((i) => (
+                        <span
+                          key={i}
+                          className="w-2 rounded-full bg-[#FAF6EE]"
+                          style={{
+                            height: `${20 + voiceLevel * 80 * (0.6 + 0.4 * Math.sin(i * 1.3))}%`,
+                            transition: "height 0.08s ease-out",
+                          }}
+                        ></span>
+                      ))}
+                    </div>
+                  ) : (
+                    <img
+                      src="/aluta-logo.png"
+                      alt="Aluta"
+                      className="w-28 h-28 rounded-full transition-transform duration-300"
+                      style={{
+                        transform:
+                          voiceState === "listening"
+                            ? `scale(${1 + voiceLevel * 0.1})`
+                            : "scale(1)",
+                      }}
+                    />
+                  )}
                 </div>
               </div>
 
-              {/* Status */}
-              <div className="text-[#FAF6EE] text-lg font-semibold mb-2">
-                {voiceState === "idle" && "Tap the mic to respond"}
+              {/* Status text */}
+              <div
+                key={voiceState}
+                className="fade-up text-[#FAF6EE] text-xl font-bold mb-2"
+                style={{ fontFamily: "Fraunces, serif" }}
+              >
+                {voiceState === "idle" && "Ready when you are"}
                 {voiceState === "listening" && "Listening..."}
                 {voiceState === "thinking" && "The examiner is considering..."}
-                {voiceState === "speaking" && "The examiner is speaking..."}
+                {voiceState === "speaking" && "The examiner is speaking"}
               </div>
 
-              {/* Interim transcript */}
-              <div className="text-[#FAF6EE]/60 text-sm min-h-[3rem] mb-6 italic">
+              {/* Interim transcript / hint */}
+              <div className="text-[#FAF6EE]/60 text-sm min-h-[3rem] max-w-md mb-8 italic leading-relaxed px-4">
                 {interimTranscript ||
                   (messages.length === 0 && voiceState === "idle"
                     ? "Start by stating your project title and main findings."
-                    : "")}
+                    : voiceState === "idle"
+                      ? "Tap the mic to give your next answer."
+                      : "")}
               </div>
 
               {!voiceSupported && (
-                <div className="text-red-300 text-sm mb-4">
+                <div className="bg-red-500/20 border border-red-400/30 text-red-200 text-sm rounded-xl px-4 py-2 mb-4">
                   Voice isn&apos;t supported in this browser. Try Chrome, Edge,
                   or Brave.
                 </div>
               )}
               {permissionDenied && (
-                <div className="text-red-300 text-sm mb-4">
-                  Microphone access was denied. Enable it in your browser
-                  settings.
+                <div className="bg-red-500/20 border border-red-400/30 text-red-200 text-sm rounded-xl px-4 py-2 mb-4">
+                  Microphone access was denied. Enable it in browser settings.
                 </div>
               )}
 
@@ -981,15 +1061,20 @@ export default function Home() {
                   voiceState === "thinking" ||
                   voiceState === "speaking"
                 }
-                className={`w-20 h-20 rounded-full flex items-center justify-center text-3xl transition-all disabled:opacity-30 ${
+                className={`group relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed ${
                   voiceState === "listening"
-                    ? "bg-red-500 text-white"
-                    : "bg-[#E5B045] text-[#1A0B3D]"
+                    ? "bg-red-500 scale-110 shadow-[0_0_40px_rgba(239,68,68,0.6)]"
+                    : "bg-[#E5B045] hover:scale-105 shadow-[0_0_30px_rgba(229,176,69,0.4)]"
                 }`}
               >
-                {voiceState === "listening" ? "■" : "🎙️"}
+                {voiceState === "listening" && (
+                  <span className="absolute inset-0 rounded-full bg-red-500/40 animate-ping"></span>
+                )}
+                <span className="relative text-3xl">
+                  {voiceState === "listening" ? "■" : "🎙️"}
+                </span>
               </button>
-              <div className="text-[#FAF6EE]/40 text-xs mt-3">
+              <div className="text-[#FAF6EE]/40 text-xs mt-4 tracking-wide">
                 {voiceState === "listening"
                   ? "Tap to stop and send"
                   : voiceState === "idle"
@@ -1003,7 +1088,7 @@ export default function Home() {
                   resetVoice();
                   setVoiceMode(false);
                 }}
-                className="mt-10 text-[#FAF6EE]/60 hover:text-[#FAF6EE] text-sm font-medium border border-white/20 hover:border-white/40 px-5 py-2 rounded-full transition-colors"
+                className="mt-12 text-[#FAF6EE]/50 hover:text-[#FAF6EE] text-sm font-medium border border-white/15 hover:border-white/40 hover:bg-white/5 px-6 py-2.5 rounded-full transition-all"
               >
                 End voice session
               </button>

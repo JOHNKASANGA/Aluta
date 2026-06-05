@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import mammoth from "mammoth";
 
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
