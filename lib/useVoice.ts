@@ -221,11 +221,9 @@ export function useVoice({ onUserSpoke }: UseVoiceOptions) {
       raf = requestAnimationFrame(tick);
     };
     tick();
-    console.log("speaking animation started, state:", state);
     return () => {
       cancelAnimationFrame(raf);
       setVoiceLevel(0);
-      console.log("speaking animation stopped");
     };
   }, [state]);
 

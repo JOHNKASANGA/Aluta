@@ -29,7 +29,7 @@ const FEATURES = [
     short: "Turn any material into a study pack.",
     long: "Upload a chapter, lecture notes, or a past paper. Reading Guide produces a structural map, the must-know concepts ranked by importance, the trap zones where students lose marks, and practice questions in your lecturer's style.",
     href: "#",
-    available: false,
+    available: true,
   },
   {
     key: "scheduler",

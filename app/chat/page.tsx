@@ -67,7 +67,7 @@ export default function Home() {
   const voiceTurnRef = useRef<(t: string) => void>(() => {});
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [mode, setMode] = useState<"defence" | "tutor">("defence");
+  const [mode, setMode] = useState<"defence" | "tutor" | "reading">("defence");
   const [greeting, setGreeting] = useState("Hello");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>(
@@ -100,7 +100,7 @@ export default function Home() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const m = params.get("mode");
-    if (m === "tutor" || m === "defence") setMode(m);
+    if (m === "tutor" || m === "defence" || m === "reading") setMode(m);
   }, []);
 
   const {
@@ -411,7 +411,7 @@ export default function Home() {
     setActiveId(null);
   }
 
-  function switchMode(newMode: "defence" | "tutor") {
+  function switchMode(newMode: "defence" | "tutor" | "reading") {
     if (newMode === mode) return;
     setMode(newMode);
     setMessages([]);
@@ -507,7 +507,9 @@ export default function Home() {
             placeholder={
               mode === "defence"
                 ? "Paste your project, or attach a PDF to begin..."
-                : "What topic or problem are you working on?"
+                : mode === "tutor"
+                  ? "What topic or problem are you working on?"
+                  : "Attach your reading material, or paste it here..."
             }
             rows={2}
             className="w-full bg-transparent text-sm text-[#1A1033] placeholder-[#1A0B3D]/40 focus:outline-none resize-none px-2 py-1"
@@ -613,7 +615,14 @@ export default function Home() {
               accent="#E5B045"
               onClick={() => switchMode("tutor")}
             />
-            <ModeRow icon="📖" label="Reading Guide" tag="Soon" />
+            <ModeRow
+              icon="📖"
+              label="Reading Guide"
+              tag={mode === "reading" ? "Active" : ""}
+              active={mode === "reading"}
+              accent="#E5B045"
+              onClick={() => switchMode("reading")}
+            />
             <ModeRow icon="📅" label="Scheduler" tag="Soon" />
           </div>
         </div>
@@ -625,7 +634,15 @@ export default function Home() {
             className="w-full bg-[#E5B045] hover:bg-[#F0C055] text-[#1A0B3D] font-semibold py-2.5 rounded-lg text-sm flex items-center justify-center gap-2 transition-colors"
           >
             <span>+</span>
-            <span>New {mode === "defence" ? "defence" : "tutor"} session</span>
+            <span>
+              New{" "}
+              {mode === "defence"
+                ? "defence"
+                : mode === "tutor"
+                  ? "tutor"
+                  : "reading"}{" "}
+              session
+            </span>
           </button>
         </div>
 
@@ -661,7 +678,12 @@ export default function Home() {
         {/* History */}
         <div className="px-4 py-4 flex-1 overflow-y-auto">
           <div className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-2">
-            {mode === "defence" ? "Defence" : "Tutor"} history
+            {mode === "defence"
+              ? "Defence"
+              : mode === "tutor"
+                ? "Tutor"
+                : "Reading Guide"}{" "}
+            history
           </div>
           {sessions.length > 0 ? (
             <div className="space-y-1">
@@ -741,7 +763,11 @@ export default function Home() {
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-[#E5B045] animate-pulse"></span>
                 <span className="text-xs uppercase tracking-widest text-[#1A0B3D]/60 font-bold">
-                  {mode === "defence" ? "Defence Mode" : "Tutor Mode"}
+                  {mode === "defence"
+                    ? "Defence Mode"
+                    : mode === "tutor"
+                      ? "Tutor Mode"
+                      : "Reading Guide"}
                 </span>
               </div>
               <h2
@@ -753,9 +779,13 @@ export default function Home() {
                     Face the{" "}
                     <span className="text-[#1A0B3D]">External Examiner</span>
                   </>
-                ) : (
+                ) : mode === "tutor" ? (
                   <>
                     Your <span className="text-[#1A0B3D]">Study Tutor</span>
+                  </>
+                ) : (
+                  <>
+                    Your <span className="text-[#1A0B3D]">Reading Guide</span>
                   </>
                 )}
               </h2>
@@ -771,11 +801,15 @@ export default function Home() {
                 </button>
               )}
               <div className="hidden md:flex items-center gap-2 bg-[#1A0B3D] text-[#FAF6EE] px-4 py-2 rounded-full text-xs font-medium">
-                <span>{mode === "defence" ? "🎓" : "📚"}</span>
+                <span>
+                  {mode === "defence" ? "🎓" : mode === "tutor" ? "📚" : "📖"}
+                </span>
                 <span>
                   {mode === "defence"
                     ? "Pass the panel"
-                    : "Actually understand it"}
+                    : mode === "tutor"
+                      ? "Actually understand it"
+                      : "Read smarter"}
                 </span>
               </div>
             </div>
@@ -795,7 +829,9 @@ export default function Home() {
               <p className="text-[#1A0B3D]/60 text-base">
                 {mode === "defence"
                   ? "Share your project and let's rehearse your defence."
-                  : "Tell me what you're studying and where you're stuck."}
+                  : mode === "tutor"
+                    ? "Tell me what you're studying and where you're stuck."
+                    : "Upload your material and I'll turn it into a study pack."}
               </p>
             </div>
             <div className="w-full max-w-2xl bounce-in">{renderInputBox()}</div>
@@ -840,7 +876,11 @@ export default function Home() {
                     >
                       {m.role === "assistant" && (
                         <div className="text-[10px] uppercase tracking-widest font-bold text-[#1A0B3D]/60 mb-2">
-                          {mode === "defence" ? "External Examiner" : "Tutor"}
+                          {mode === "defence"
+                            ? "External Examiner"
+                            : mode === "tutor"
+                              ? "Tutor"
+                              : "Reading Guide"}
                         </div>
                       )}
                       {m.attachments && m.attachments.length > 0 && (
@@ -957,9 +997,7 @@ export default function Home() {
                     animation: "spin 2s linear infinite",
                   }}
                 ></div>
-                <div className="text-yellow-400 text-xs">
-                  level: {voiceLevel.toFixed(2)}
-                </div>
+
                 {/* Core orb — scales with real voice amplitude */}
                 <div
                   className={`orb-float relative w-40 h-40 rounded-full flex items-center justify-center transition-[box-shadow] duration-300 ${
